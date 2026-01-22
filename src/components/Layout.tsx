@@ -6,6 +6,7 @@ import Sidebar from './Sidebar';
 import socket from '../lib/socket';
 import toast from 'react-hot-toast';
 import { reminderApi } from '../lib/reminderApi';
+import ReminderNotification from '../pages/ReminderNotification';
 
 interface Reminder {
   _id: string;
@@ -28,6 +29,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [triggeredReminder, setTriggeredReminder] = useState<Reminder | null>(null);
+  const [showReminderPopup, setShowReminderPopup] = useState(false);
 
   const handleToggleSidebar = () => {
     setIsSidebarOpen(prev => !prev);
@@ -50,7 +53,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           _id: r._id,
           title: r.title,
           note: r.note,
-          reminderAt: r.remindAt || r.reminderAt, // Handle both field names
+          reminderAt: r.remindAt || r.reminderAt,
           createdAt: r.createdAt,
           lead: r.lead
         }));
@@ -71,6 +74,63 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   }, [isAuthenticated]);
 
+  //add from here
+
+  /* ================= HANDLE REMINDER POPUP ================= */
+  const handleMarkDoneFromPopup = async (reminderId: string) => {
+    try {
+      const res = await reminderApi.updateReminder(reminderId, { action: 'done' } as const);
+      if (res.success) {
+        toast.success('Reminder marked as done');
+        setShowReminderPopup(false);
+        setTriggeredReminder(null);
+        fetchReminders(); // Refresh the list
+      }
+    } catch (error) {
+      console.error('Error marking reminder as done:', error);
+      toast.error('Failed to mark reminder as done');
+    }
+  };
+
+  const handleSocketReminder = (data: any) => {
+    console.log('🔔 Reminder received via socket:', data);
+
+    // Play notification sound
+    try {
+      new Audio('/notification.mp3').play();
+    } catch (error) {
+      console.log('Audio playback failed:', error);
+    }
+
+    // Set the triggered reminder and show popup
+    const newReminder: Reminder = {
+      _id: data._id,
+      title: data.title,
+      note: data.note,
+      reminderAt: data.remindAt,
+      createdAt: data.createdAt,
+      lead: data.lead
+    };
+
+    setTriggeredReminder(newReminder);
+    setShowReminderPopup(true);
+
+    // Also add to reminders list
+    setReminders(prev => {
+      const exists = prev.find(r => r._id === data._id);
+      if (exists) return prev;
+      return [newReminder, ...prev];
+    });
+
+    // Show toast too
+    toast.success(`🔔 ${data.title}`, {
+      duration: 5000,
+      icon: '⏰',
+    });
+  };
+// to here 
+
+
   /* ================= 🔔 SOCKET REMINDER LISTENER ================= */
   useEffect(() => {
     if (!user?._id) return;
@@ -83,39 +143,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       socket.emit('join', user._id);
       console.log(' Socket connected & joined user room:', user._id);
     };
-  
-    const handleReminder = (data: any) => {
-      console.log('🔔 Real-time reminder received:', data);
-  
-      // Play notification sound
-      try {
-        new Audio('/notification.mp3').play();
-      } catch (error) {
-        console.log('Audio playback failed:', error);
-      }
-      
-      // Add new reminder to the beginning of the list
-      setReminders(prev => {
-        // Prevent duplicates
-        const exists = prev.find(r => r._id === data._id);
-        if (exists) return prev;
-        
-        return [{
-          _id: data._id,
-          title: data.title,
-          note: data.note,
-          reminderAt: data.remindAt || data.reminderAt,
-          createdAt: data.createdAt,
-          lead: data.lead
-        }, ...prev];
-      });
-      
-      // Show toast notification
-      toast.success(`🔔 ${data.title}`, {
-        duration: 5000,
-        icon: '⏰',
-      });
-    };
 
     const handleReminderUpdate = (data: any) => {
       console.log('🔄 Reminder updated:', data);
@@ -123,7 +150,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       // Update the specific reminder in the list
       setReminders(prev => prev.map(r => {
         if (r._id === data._id) {
-          // If it's a snooze action, update the reminderAt properly
           const updatedReminderAt = data.remindAt || data.reminderAt || r.reminderAt;
           
           return {
@@ -137,6 +163,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         return r;
       }));
     };
+
     const handleReminderDelete = (reminderId: string) => {
       console.log('🗑️ Reminder deleted via socket:', reminderId);
       
@@ -146,7 +173,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     // Socket event listeners
     socket.on('connect', handleConnect);
-    socket.on('reminder', handleReminder);
+    socket.on('reminder', handleSocketReminder); // Changed to handleSocketReminder
     socket.on('reminder:update', handleReminderUpdate);
     socket.on('reminder:delete', handleReminderDelete);
     socket.on('reminder:done', (data) => {
@@ -159,7 +186,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       // Update the reminder with new snooze time
       setReminders(prev => prev.map(r => {
         if (r._id === data._id) {
-          // Make sure we get the new snooze time
           const newReminderTime = data.snoozeUntil || data.remindAt || data.reminderAt;
           return {
             ...r,
@@ -169,13 +195,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         return r;
       }));
     });
+    
     // Join user's room
     socket.emit('join', user._id);
 
     return () => {
       // Clean up all socket listeners
       socket.off('connect', handleConnect);
-      socket.off('reminder', handleReminder);
+      socket.off('reminder', handleSocketReminder);
       socket.off('reminder:update', handleReminderUpdate);
       socket.off('reminder:delete', handleReminderDelete);
       socket.off('reminder:done');
@@ -232,6 +259,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         reminders={reminders}
         refreshReminders={handleRefreshReminders}
       />
+
+      {/* Reminder Notification Popup */}
+      {showReminderPopup && triggeredReminder && (
+        <ReminderNotification
+          reminder={triggeredReminder}
+          onClose={() => {
+            setShowReminderPopup(false);
+            setTriggeredReminder(null);
+          }}
+          onMarkDone={handleMarkDoneFromPopup}
+        />
+      )}
 
       {/* Optional: Show refreshing indicator */}
       {isRefreshing && (
