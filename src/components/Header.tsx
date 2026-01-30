@@ -146,7 +146,7 @@ export const ReminderItem: React.FC<{
             // Update locally immediately
             if (res.data && res.data.reminder) {
               // If backend returns updated reminder, update local state
-              const updatedReminder = res.data.reminder;
+              // const updatedReminder = res.data.reminder;
               // You might need to pass this up to parent
             }
             
