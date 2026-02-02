@@ -150,9 +150,32 @@ export const authApi = {
 
 // User Management API
 export const userApi = {
-  getUsers: async (): Promise<ApiResponse<User[]>> => {
+  getUsers: async (page: number = 1, limit: number = 10, search?: string): Promise<PaginatedResponse<User>> => {
     try {
-      const response = await api.get('/users');
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString()
+      });
+      
+      if (search) {
+        params.append('search', search);
+      }
+
+      const response = await api.get(`/users?${params.toString()}`);
+      return response.data;
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch users',
+        data: [],
+        pagination: { page: 1, limit: 10, total: 0, totalPages: 0 }
+      };
+    }
+  },
+
+  getAllUsers: async (): Promise<ApiResponse<User[]>> => {
+    try {
+      const response = await api.get('/users?limit=1000'); // Fetch all users
       return handleResponse(response);
     } catch (error) {
       return handleError(error);
