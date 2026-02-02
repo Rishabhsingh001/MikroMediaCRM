@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { leadApi, statusApi } from '../lib/api';
+import { leadApi, userApi, statusApi } from '../lib/api';
 import type { Lead, User, LeadStatus, LeadSource } from '../types';
 import InfiniteScrollUserDropdown from '../components/InfiniteScrollUserDropdown_Portal';
-import { 
+import {
   UserPlus,
   Search,
   ArrowLeft,
@@ -21,6 +21,8 @@ import toast from 'react-hot-toast';
 const AssignLeads: React.FC = () => {
   const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
+  // We keep the users state for the *Filter* dropdown, ensuring filtering functionality works.
+  const [users, setUsers] = useState<User[]>([]);
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -35,8 +37,8 @@ const AssignLeads: React.FC = () => {
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [folderStats, setFolderStats] = useState<Record<string, number>>({});
   const [statusStats, setStatusStats] = useState<Record<string, number>>({});
-  const [userFilter, setUserFilter] = useState<string>('unassigned');
-  
+  const [userFilter, setUserFilter] = useState<string>('unassigned'); // 'all', 'unassigned', or user ID
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -70,29 +72,37 @@ const AssignLeads: React.FC = () => {
   useEffect(() => {
     if (currentView === 'leads') {
       fetchLeads();
+      // Ensure users are loaded for the filter dropdown
+      if (users.length === 0) {
+        fetchUsers();
+      }
     }
   }, [currentPage, userFilter, currentView, leadsPerPage, statusFilter, sourceFilter, folderFilter, appliedSearchQuery]);
 
   const fetchData = async () => {
-    await Promise.all([fetchLeads(), fetchFolders()]);
+    await Promise.all([fetchLeads(), fetchUsers(), fetchFolders()]);
   };
 
   const fetchFolders = async () => {
     try {
       setLoading(true);
-      
+
+      // Fetch both folders and their counts efficiently
       const [foldersResponse, countsResponse] = await Promise.all([
         leadApi.getDistinctFolders(),
         leadApi.getFolderCounts()
       ]);
-      
+
       if (foldersResponse.success && foldersResponse.data) {
+        // Add default folder for uncategorized leads
         const allFolders = [...foldersResponse.data, 'Uncategorized'];
         setAvailableFolders(allFolders);
-        
+
+        // Use server-side folder counts if available
         if (countsResponse.success && countsResponse.data) {
           setFolderStats(countsResponse.data);
         } else {
+          // Fallback to zero counts
           const stats: Record<string, number> = {};
           allFolders.forEach(folder => {
             stats[folder] = 0;
@@ -101,6 +111,7 @@ const AssignLeads: React.FC = () => {
         }
       }
 
+      // Fetch status counts
       const allLeadsResponse = await leadApi.getLeads({}, 1, 10000);
       if (allLeadsResponse.success) {
         const stats: Record<string, number> = {};
@@ -121,7 +132,7 @@ const AssignLeads: React.FC = () => {
     try {
       setLoading(true);
       const filters: any = {};
-      
+
       if (statusFilter) filters.status = [statusFilter];
       if (sourceFilter) filters.source = [sourceFilter];
       if (folderFilter) {
@@ -132,7 +143,8 @@ const AssignLeads: React.FC = () => {
         }
       }
       if (appliedSearchQuery) filters.search = appliedSearchQuery;
-      
+
+      // Handle user filter
       if (userFilter === 'unassigned') {
         filters.assignedTo = [null];
       } else if (userFilter !== 'all') {
@@ -140,7 +152,7 @@ const AssignLeads: React.FC = () => {
       }
 
       const response = await leadApi.getLeads(filters, currentPage, leadsPerPage);
-      
+
       if (response.success) {
         setLeads(response.data);
         if (response.pagination) {
@@ -168,6 +180,19 @@ const AssignLeads: React.FC = () => {
     }
   };
 
+  const fetchUsers = async () => {
+    try {
+      const response = await userApi.getUsers();
+      if (response.success && response.data) {
+        // Show all active users for filtering
+        const activeUsers = response.data.filter(u => u.isActive);
+        setUsers(activeUsers);
+      }
+    } catch (error) {
+      console.error('Failed to fetch users');
+    }
+  };
+
   const handleSelectLead = (leadId: string) => {
     setSelectedLeads(prev =>
       prev.includes(leadId)
@@ -178,26 +203,26 @@ const AssignLeads: React.FC = () => {
 
   const handleSelectAll = () => {
     setSelectedLeads(
-      selectedLeads.length === leads.length 
-        ? [] 
+      selectedLeads.length === leads.length
+        ? []
         : leads.map(lead => lead._id)
     );
   };
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
-    setSelectedLeads([]);
+    setSelectedLeads([]); // Clear selection when changing pages
   };
 
   const handlePageSizeChange = (newPageSize: number) => {
     setLeadsPerPage(newPageSize);
     setCurrentPage(1);
-    setSelectedLeads([]);
+    setSelectedLeads([]); // Clear selection when changing page size
   };
 
   const handleFilterChange = () => {
-    setCurrentPage(1);
-    setSelectedLeads([]);
+    setCurrentPage(1); // Reset to first page when filters change
+    setSelectedLeads([]); // Clear selection when filters change
   };
 
   const getSourceColor = (source: LeadSource): string => {
@@ -220,10 +245,14 @@ const AssignLeads: React.FC = () => {
     } else {
       setFolderFilter(folder);
     }
-    setStatusFilter('');
+    setStatusFilter(''); // Clear status filter when selecting folder
     setCurrentView('leads');
     setCurrentPage(1);
     setSelectedLeads([]);
+    // Ensure users are loaded when switching to leads view
+    if (users.length === 0) {
+      fetchUsers();
+    }
   };
 
   const handleBackToFolders = () => {
@@ -243,6 +272,7 @@ const AssignLeads: React.FC = () => {
       return;
     }
 
+    // Check if at least one action is selected
     if (!selectedUser && !bulkStatus) {
       toast.error('Please select an action (assign user and/or update status)');
       return;
@@ -253,7 +283,8 @@ const AssignLeads: React.FC = () => {
 
     try {
       const actions = [];
-      
+
+      // Execute assignment if user is selected
       if (selectedUser) {
         if (selectedUser === 'unassign') {
           actions.push(
@@ -271,13 +302,17 @@ const AssignLeads: React.FC = () => {
         }
       }
 
+      // Execute status update if status is selected
       if (bulkStatus) {
         actions.push(
           leadApi.bulkUpdateStatus(selectedLeads, bulkStatus)
         );
       }
 
+      // Execute all selected actions
       const responses = await Promise.all(actions);
+
+      // Check if all actions succeeded
       const allSucceeded = responses.every(r => r.success);
 
       if (allSucceeded) {
@@ -293,7 +328,7 @@ const AssignLeads: React.FC = () => {
         setSelectedLeads([]);
         setSelectedUser('');
         setBulkStatus('');
-        fetchLeads();
+        fetchLeads(); // Refresh the leads list
       } else {
         toast.error('Some actions failed. Please check and try again.');
       }
@@ -308,7 +343,7 @@ const AssignLeads: React.FC = () => {
   const getStatusColor = (status: LeadStatus): string => {
     const colors: Record<LeadStatus, string> = {
       'New': 'bg-blue-100 text-blue-800',
-      'Contacted': 'bg-yellow-100 text-yellow-800', 
+      'Contacted': 'bg-yellow-100 text-yellow-800',
       'Interested': 'bg-green-100 text-green-800',
       'Not Interested': 'bg-red-100 text-red-800',
       'Follow-up': 'bg-orange-100 text-orange-800',
@@ -320,6 +355,19 @@ const AssignLeads: React.FC = () => {
       'Wrong Number': 'bg-gray-100 text-gray-800'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  const getUserNameForPreview = () => {
+    if (!selectedUser) return '';
+    if (selectedUser === 'unassign') return 'Unassign from current user';
+
+    // Try to find the user in the loaded users list
+    const foundUser = users.find(u => u._id === selectedUser);
+    if (foundUser) {
+      return `Assign to ${foundUser.name}`;
+    }
+    // Fallback if user is from infinite scroll but not in initial 'users' list
+    return 'Assign to selected user';
   };
 
   if (loading && currentView === 'folders') {
@@ -350,7 +398,7 @@ const AssignLeads: React.FC = () => {
                 {currentView === 'folders' ? 'Assign Leads' : `Assign Leads in "${selectedFolder}"`}
               </h1>
               <p className="text-gray-600 mt-2">
-                {currentView === 'folders' 
+                {currentView === 'folders'
                   ? 'Select a folder to view and assign leads to team members'
                   : 'Assign leads to team members for follow-up'
                 }
@@ -393,64 +441,66 @@ const AssignLeads: React.FC = () => {
           </div>
           <div className="card-body">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {/* Status Groups - sorted by count */}
               {statusOptions
                 .filter(status => (statusStats[status] || 0) > 0)
                 .sort((a, b) => (statusStats[b] || 0) - (statusStats[a] || 0))
                 .map(status => (
-                <div
-                  key={`status-${status}`}
-                  className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => {
-                    setSelectedFolder(status);
-                    setCurrentView('leads');
-                    setStatusFilter(status);
-                    setFolderFilter('');
-                    setCurrentPage(1);
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${getStatusColor(status).split(' ')[0]}`}>
-                      <Target className="w-6 h-6 text-gray-700" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-medium text-gray-900">{status}</h3>
-                      <p className="text-sm text-gray-500">
-                        {statusStats[status] || 0} lead{(statusStats[status] || 0) !== 1 ? 's' : ''} • Click to assign
-                      </p>
+                  <div
+                    key={`status-${status}`}
+                    className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+                    onClick={() => {
+                      setSelectedFolder(status);
+                      setCurrentView('leads');
+                      setStatusFilter(status);
+                      setFolderFilter(''); // Clear folder filter when selecting status
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${getStatusColor(status).split(' ')[0]}`}>
+                        <Target className="w-6 h-6 text-gray-700" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-medium text-gray-900">{status}</h3>
+                        <p className="text-sm text-gray-500">
+                          {statusStats[status] || 0} lead{(statusStats[status] || 0) !== 1 ? 's' : ''} • Click to assign
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-              
+                ))}
+
+              {/* Folders - sorted by count */}
               {availableFolders
                 .sort((a, b) => (folderStats[b] || 0) - (folderStats[a] || 0))
                 .map(folder => (
-                <div
-                  key={`folder-${folder}`}
-                  className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => handleFolderSelect(folder)}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="bg-blue-100 p-2 rounded-lg">
-                      <FolderOpen className="w-6 h-6 text-blue-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-medium text-gray-900 truncate max-w-[180px]" title={folder}>
-                        {folder === 'Uncategorized' ? 'Uncategorized' : (folder || 'Unnamed Folder')}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        {folderStats[folder] || 0} lead{(folderStats[folder] || 0) !== 1 ? 's' : ''} • Click to assign
-                      </p>
+                  <div
+                    key={`folder-${folder}`}
+                    className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+                    onClick={() => handleFolderSelect(folder)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="bg-blue-100 p-2 rounded-lg">
+                        <FolderOpen className="w-6 h-6 text-blue-600" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-medium text-gray-900 truncate max-w-[180px]" title={folder}>
+                          {folder === 'Uncategorized' ? 'Uncategorized' : (folder || 'Unnamed Folder')}
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          {folderStats[folder] || 0} lead{(folderStats[folder] || 0) !== 1 ? 's' : ''} • Click to assign
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* Combined Assignment & Status Update Panel - NOW WITH INFINITE SCROLL DROPDOWN */}
+      {/* Combined Assignment & Status Update Panel */}
       {currentView === 'leads' && (
         <div className="card border-l-4 border-l-blue-500">
           <div className="card-body">
@@ -462,7 +512,7 @@ const AssignLeads: React.FC = () => {
                     Bulk Assignment & Status Update
                   </h3>
                   <p className="text-gray-600">
-                    {selectedLeads.length > 0 
+                    {selectedLeads.length > 0
                       ? `${selectedLeads.length} lead${selectedLeads.length > 1 ? 's' : ''} selected - Assign and/or update status`
                       : 'Select leads below to assign users and update status'
                     }
@@ -472,9 +522,10 @@ const AssignLeads: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-              {/* UPDATED: Using InfiniteScrollUserDropdown instead of regular select */}
-              <div>
-                <label className="form-label">Assign to User (Optional)</label>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 <InfiniteScrollUserDropdown
                   value={selectedUser}
                   onChange={setSelectedUser}
@@ -520,7 +571,7 @@ const AssignLeads: React.FC = () => {
               </div>
             </div>
 
-            {/* Action Preview - UPDATED to handle the dropdown */}
+            {/* Action Preview - Fixed for New Dropdown */}
             {selectedLeads.length > 0 && (selectedUser || bulkStatus) && (
               <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
                 <p className="text-sm text-blue-800 font-medium">
@@ -529,12 +580,7 @@ const AssignLeads: React.FC = () => {
                 <ul className="text-sm text-blue-700 mt-1 space-y-1">
                   {selectedUser && (
                     <li>
-                      • {selectedUser === 'unassign' 
-                        ? 'Unassign from current user' 
-                        : selectedUser 
-                          ? 'Assign to selected user'
-                          : 'No change to assignment'
-                      }
+                      • {getUserNameForPreview()}
                     </li>
                   )}
                   {bulkStatus && (
@@ -547,9 +593,6 @@ const AssignLeads: React.FC = () => {
         </div>
       )}
 
-      {/* Rest of the component remains the same... */}
-      {/* Filters, Table, Pagination, etc. - keeping your existing code */}
-      
       {/* Filters */}
       {currentView === 'leads' && (
         <div className="card">
@@ -605,6 +648,7 @@ const AssignLeads: React.FC = () => {
               </div>
 
               <div>
+                {/* Standard Select for Filtering (needs "All Users" and "Unassigned" options easily) */}
                 <select
                   value={userFilter}
                   onChange={(e) => {
@@ -615,7 +659,11 @@ const AssignLeads: React.FC = () => {
                 >
                   <option value="all">All Users</option>
                   <option value="unassigned">Unassigned</option>
-                  {/* Note: For the filter, we keep a simple select since it's just for filtering */}
+                  {users.map(user => (
+                    <option key={user._id} value={user._id}>
+                      {user.name} ({user.role})
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -633,13 +681,14 @@ const AssignLeads: React.FC = () => {
         </div>
       )}
 
-      {/* Leads Table - keeping your existing table code */}
+      {/* Leads Table */}
       {currentView === 'leads' && (
         <div className="card">
           <div className="card-header">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold">Leads Available for Assignment</h3>
               <div className="flex items-center gap-4">
+                {/* Active filters summary */}
                 {(statusFilter || sourceFilter || appliedSearchQuery || userFilter !== 'unassigned' || userFilter === 'unassigned') && (
                   <div className="text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded-md">
                     <span className="font-medium">Active filters:</span>
@@ -652,6 +701,11 @@ const AssignLeads: React.FC = () => {
                     {sourceFilter && <span className="ml-2 bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">Source: {sourceFilter}</span>}
                     {appliedSearchQuery && <span className="ml-2 bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Search: "{appliedSearchQuery}"</span>}
                     {userFilter === 'all' && <span className="ml-2 bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs">All users</span>}
+                    {userFilter !== 'unassigned' && userFilter !== 'all' && (
+                      <span className="ml-2 bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-xs">
+                        User: {users.find(u => u._id === userFilter)?.name}
+                      </span>
+                    )}
                   </div>
                 )}
                 <label className="flex items-center text-sm text-gray-600">
@@ -689,8 +743,8 @@ const AssignLeads: React.FC = () => {
               </thead>
               <tbody>
                 {leads.map(lead => (
-                  <tr 
-                    key={lead._id} 
+                  <tr
+                    key={lead._id}
                     className={`cursor-pointer ${selectedLeads.includes(lead._id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
                     onClick={() => window.open(`/leads/${lead._id}`, '_blank')}
                   >
@@ -734,10 +788,9 @@ const AssignLeads: React.FC = () => {
                       </span>
                     </td>
                     <td className="whitespace-nowrap">
-                      <span className={`font-medium ${
-                        lead.priority === 'High' ? 'text-red-600' :
-                        lead.priority === 'Medium' ? 'text-yellow-600' : 'text-green-600'
-                      }`}>
+                      <span className={`font-medium ${lead.priority === 'High' ? 'text-red-600' :
+                          lead.priority === 'Medium' ? 'text-yellow-600' : 'text-green-600'
+                        }`}>
                         {lead.priority}
                       </span>
                     </td>
@@ -798,7 +851,7 @@ const AssignLeads: React.FC = () => {
                   </select>
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handlePageChange(currentPage - 1)}
@@ -807,9 +860,10 @@ const AssignLeads: React.FC = () => {
                 >
                   Previous
                 </button>
-                
+
                 {Array.from({ length: totalPages }, (_, i) => i + 1)
                   .filter(page => {
+                    // Show first, last, current, and 2 pages around current
                     return (
                       page === 1 ||
                       page === totalPages ||
@@ -820,14 +874,13 @@ const AssignLeads: React.FC = () => {
                     <button
                       key={page}
                       onClick={() => handlePageChange(page)}
-                      className={`btn btn-sm ${
-                        currentPage === page ? 'btn-primary' : 'btn-outline'
-                      }`}
+                      className={`btn btn-sm ${currentPage === page ? 'btn-primary' : 'btn-outline'
+                        }`}
                     >
                       {page}
                     </button>
                   ))}
-                
+
                 <button
                   onClick={() => handlePageChange(currentPage + 1)}
                   disabled={currentPage === totalPages}
@@ -840,16 +893,16 @@ const AssignLeads: React.FC = () => {
           )}
 
           {/* Empty State */}
-          {leads.length === 0 && !loading && (
+          {leads.length === 0 && (
             <div className="text-center py-12">
               <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No leads found</h3>
               <p className="text-gray-500 mb-4">
-                {userFilter === 'unassigned' 
-                  ? 'All leads are currently assigned' 
+                {userFilter === 'unassigned'
+                  ? 'All leads are currently assigned'
                   : userFilter === 'all'
-                  ? 'No leads match your filter criteria'
-                  : 'No leads found'
+                    ? 'No leads match your filter criteria'
+                    : `No leads assigned to ${users.find(u => u._id === userFilter)?.name || 'this user'}`
                 }
               </p>
               <div className="flex justify-center gap-3">
@@ -861,6 +914,7 @@ const AssignLeads: React.FC = () => {
                     setUserFilter('unassigned');
                     setCurrentPage(1);
                     setSelectedLeads([]);
+                    // Don't clear statusFilter or folderFilter - they stay locked to selectedFolder
                   }}
                   className="btn btn-secondary"
                 >
@@ -889,9 +943,9 @@ const AssignLeads: React.FC = () => {
                   <ul className="list-disc pl-5 space-y-1">
                     <li>Use the user filter to see leads assigned to specific users or unassigned leads</li>
                     <li>Select multiple leads and choose "Unassign" to remove them from their current assignee</li>
-                    <li>The user dropdown supports search and loads more users as you scroll</li>
                     <li>Consider lead priority and user workload when assigning</li>
                     <li>Match lead characteristics with user expertise</li>
+                    <li>Use filters to find specific types of leads for assignment</li>
                     <li>Assigned users will receive notifications about their new leads</li>
                   </ul>
                 </div>

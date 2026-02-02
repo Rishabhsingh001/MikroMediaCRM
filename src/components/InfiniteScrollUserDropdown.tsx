@@ -11,12 +11,6 @@ interface InfiniteScrollUserDropdownProps {
   placeholder?: string;
 }
 
-interface UserPage {
-  users: User[];
-  hasMore: boolean;
-  currentPage: number;
-}
-
 const InfiniteScrollUserDropdown: React.FC<InfiniteScrollUserDropdownProps> = ({
   value,
   onChange,
@@ -63,7 +57,7 @@ const InfiniteScrollUserDropdown: React.FC<InfiniteScrollUserDropdownProps> = ({
       });
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/users?${params}`,
+        `${import.meta.env.VITE_API_URL || 'https://api.leads.edtechinformative.uk/api'}/users?${params}`,
         {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`,

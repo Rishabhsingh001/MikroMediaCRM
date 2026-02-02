@@ -23,7 +23,7 @@ import type {
 
 // Create axios instance with base configuration
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'https://api.leads.edtechinformative.uk/api',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
