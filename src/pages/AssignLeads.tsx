@@ -29,6 +29,13 @@ const AssignLeads: React.FC = () => {
   const [assigning, setAssigning] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
+  // Date filter state
+const [fromDate, setFromDate] = useState('');
+const [toDate, setToDate] = useState('');
+
+const [appliedFromDate, setAppliedFromDate] = useState('');
+const [appliedToDate, setAppliedToDate] = useState('');
+
   const [statusFilter, setStatusFilter] = useState<LeadStatus | ''>('');
   const [sourceFilter, setSourceFilter] = useState<LeadSource | ''>('');
   const [folderFilter, setFolderFilter] = useState<string>('');
@@ -77,8 +84,20 @@ const AssignLeads: React.FC = () => {
         fetchUsers();
       }
     }
-  }, [currentPage, userFilter, currentView, leadsPerPage, statusFilter, sourceFilter, folderFilter, appliedSearchQuery]);
-
+  }, [
+    currentPage,
+    userFilter,
+    currentView,
+    leadsPerPage,
+    statusFilter,
+    sourceFilter,
+    folderFilter,
+    appliedSearchQuery,
+    appliedFromDate,
+    appliedToDate
+  ]);
+  
+  
   const fetchData = async () => {
     await Promise.all([fetchLeads(), fetchUsers(), fetchFolders()]);
   };
@@ -132,27 +151,42 @@ const AssignLeads: React.FC = () => {
     try {
       setLoading(true);
       const filters: any = {};
-
+  
+      // existing filters
       if (statusFilter) filters.status = [statusFilter];
       if (sourceFilter) filters.source = [sourceFilter];
+  
       if (folderFilter) {
-        if (folderFilter === 'Uncategorized') {
-          filters.folder = ['Uncategorized'];
-        } else {
-          filters.folder = [folderFilter];
-        }
+        filters.folder = [folderFilter];
       }
+  
       if (appliedSearchQuery) filters.search = appliedSearchQuery;
-
-      // Handle user filter
+  
       if (userFilter === 'unassigned') {
-        filters.assignedTo = [null];
+        filters.assignedTo = null;
       } else if (userFilter !== 'all') {
         filters.assignedTo = [userFilter];
       }
-
-      const response = await leadApi.getLeads(filters, currentPage, leadsPerPage);
-
+  
+   //   ✅ DATE FILTER LOGIC
+      if (
+        appliedFromDate &&
+        appliedToDate &&
+        appliedFromDate === appliedToDate
+      ) {
+        // single day
+        filters.date = appliedFromDate;
+      } else {
+        if (appliedFromDate) filters.fromDate = appliedFromDate;
+        if (appliedToDate) filters.toDate = appliedToDate;
+      }
+  
+      const response = await leadApi.getLeads(
+        filters,
+        currentPage,
+        leadsPerPage
+      );
+  
       if (response.success) {
         setLeads(response.data);
         if (response.pagination) {
@@ -168,6 +202,7 @@ const AssignLeads: React.FC = () => {
       setLoading(false);
     }
   };
+  
 
   const fetchStatuses = async () => {
     try {
@@ -599,9 +634,15 @@ const AssignLeads: React.FC = () => {
           <div className="card-body">
             <form onSubmit={(e) => {
               e.preventDefault();
-              setAppliedSearchQuery(searchQuery);
-              setCurrentPage(1);
-            }} className="grid grid-cols-1 md:grid-cols-7 gap-4">
+            setAppliedSearchQuery(searchQuery);
+
+// apply date filters
+setAppliedFromDate(fromDate);
+setAppliedToDate(toDate);
+
+setCurrentPage(1);
+fetchLeads();
+            }} className="grid grid-cols-1 md:grid-cols-9 gap-4">
               <div className="md:col-span-2">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -614,6 +655,25 @@ const AssignLeads: React.FC = () => {
                   />
                 </div>
               </div>
+{/* From Date */}
+<div>
+  <input
+    type="date"
+    className="form-input w-full"
+    value={fromDate}
+    onChange={(e) => setFromDate(e.target.value)}
+  />
+</div>
+
+{/* To Date */}
+<div>
+  <input
+    type="date"
+    className="form-input w-full"
+    value={toDate}
+    onChange={(e) => setToDate(e.target.value)}
+  />
+</div>
 
               <div>
                 <select
@@ -668,13 +728,24 @@ const AssignLeads: React.FC = () => {
               </div>
 
               <div>
-                <button
-                  type="submit"
-                  className="btn btn-primary w-full"
-                >
-                  <Search className="w-4 h-4" />
-                  Search
-                </button>
+              <button
+  type="submit"
+  disabled={loading}
+  className="btn btn-primary w-full"
+>
+  {loading ? (
+    <>
+      <div className="loading-spinner mr-2"></div>
+      Searching...
+    </>
+  ) : (
+    <>
+      <Search className="w-4 h-4" />
+      Search
+    </>
+  )}
+</button>
+
               </div>
             </form>
           </div>
@@ -686,38 +757,21 @@ const AssignLeads: React.FC = () => {
         <div className="card">
           <div className="card-header">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Leads Available for Assignment</h3>
-              <div className="flex items-center gap-4">
-                {/* Active filters summary */}
-                {(statusFilter || sourceFilter || appliedSearchQuery || userFilter !== 'unassigned' || userFilter === 'unassigned') && (
-                  <div className="text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded-md">
-                    <span className="font-medium">Active filters:</span>
-                    {userFilter === 'unassigned' && (
-                      <span className="ml-2 bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-semibold border border-yellow-300">
-                        ⚠️ Unassigned Only
-                      </span>
-                    )}
-                    {statusFilter && <span className="ml-2 bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">Status: {statusFilter}</span>}
-                    {sourceFilter && <span className="ml-2 bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">Source: {sourceFilter}</span>}
-                    {appliedSearchQuery && <span className="ml-2 bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Search: "{appliedSearchQuery}"</span>}
-                    {userFilter === 'all' && <span className="ml-2 bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs">All users</span>}
-                    {userFilter !== 'unassigned' && userFilter !== 'all' && (
-                      <span className="ml-2 bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-xs">
-                        User: {users.find(u => u._id === userFilter)?.name}
-                      </span>
-                    )}
-                  </div>
-                )}
-                <label className="flex items-center text-sm text-gray-600">
-                  <input
-                    type="checkbox"
-                    checked={selectedLeads.length === leads.length && leads.length > 0}
-                    onChange={handleSelectAll}
-                    className="mr-2"
-                  />
-                  Select All ({leads.length})
-                </label>
-              </div>
+              <h3 className="text-lg font-semibold">Leads Assignment</h3>
+              <div className="flex items-center gap-3">
+  <h3 className="text-lg font-semibold">
+    Leads Available for Assignment
+  </h3>
+
+  {loading && (
+    <span className="flex items-center gap-2 text-sm text-gray-500">
+      <div className="loading-spinner w-4 h-4"></div>
+      Refreshing…
+    </span>
+  )}
+</div>
+
+
             </div>
           </div>
 
@@ -737,6 +791,8 @@ const AssignLeads: React.FC = () => {
                   <th className="whitespace-nowrap">Status</th>
                   <th className="whitespace-nowrap">Source</th>
                   <th className="whitespace-nowrap">Priority</th>
+                  <th className="whitespace-nowrap">Created At</th>
+
                   <th className="whitespace-nowrap">Notes</th>
                   <th className="whitespace-nowrap">Current Assignment</th>
                 </tr>
@@ -794,6 +850,10 @@ const AssignLeads: React.FC = () => {
                         {lead.priority}
                       </span>
                     </td>
+                    <td className="whitespace-nowrap text-sm text-gray-600">
+  {new Date(lead.createdAt).toLocaleString()}
+</td>
+
                     <td className="whitespace-nowrap max-w-xs">
                       {lead.notes && lead.notes.length > 0 ? (
                         <div className="text-sm">

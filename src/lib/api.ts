@@ -230,36 +230,75 @@ export const userApi = {
 
 // Lead Management API
 export const leadApi = {
-  getLeads: async (filters?: LeadFilters, page?: number, limit?: number): Promise<PaginatedResponse<Lead>> => {
+  getLeads: async (
+    filters?: LeadFilters,
+    page?: number,
+    limit?: number
+  ): Promise<PaginatedResponse<Lead>> => {
     try {
+      console.log("we are hitting this");
+  
       const params = new URLSearchParams();
+  
       if (filters) {
         Object.entries(filters).forEach(([key, value]) => {
+  
+          // ✅ FIX: preserve assignedTo=null (BACKWARD COMPATIBLE)
+          if (key === 'assignedTo' && value === null) {
+            params.append('assignedTo', 'null');
+            return;
+          }
+  
           if (value !== undefined && value !== null) {
+  
+            // ✅ KEEP: array support (UNCHANGED)
             if (Array.isArray(value)) {
-              value.forEach(v => params.append(key, v));
-            } else if (typeof value === 'object') {
+              value.forEach(v => params.append(key, v.toString()));
+            }
+  
+            // ✅ ADD: date filters (SAFE ADDITION)
+            else if (
+              key === 'date' ||
+              key === 'fromDate' ||
+              key === 'toDate'
+            ) {
+              params.append(key, value.toString());
+            }
+  
+            // ✅ KEEP: object support (UNCHANGED)
+            else if (typeof value === 'object') {
               params.append(key, JSON.stringify(value));
-            } else {
+            }
+  
+            // ✅ KEEP: primitive support (UNCHANGED)
+            else {
               params.append(key, value.toString());
             }
           }
         });
       }
+  
       if (page) params.append('page', page.toString());
       if (limit) params.append('limit', limit.toString());
-
+  
       const response = await api.get(`/leads?${params.toString()}`);
       return response.data;
+  
     } catch (error) {
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Failed to fetch leads',
         data: [],
-        pagination: { page: 1, limit: 10, total: 0, totalPages: 0 }
+        pagination: {
+          page: page || 1,
+          limit: limit || 10,
+          total: 0,
+          totalPages: 0
+        }
       };
     }
   },
+  
 
   getDuplicateLeads: async (
     filters?: LeadFilters,
