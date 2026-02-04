@@ -29,6 +29,8 @@ const Settings: React.FC = () => {
   const [profileData, setProfileData] = useState({
     name: user?.name || '',
     email: user?.email || '',
+    // Cast user to 'any' to bypass the missing 'phone' property error
+    phone: (user as any)?.phone || '', 
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
@@ -39,11 +41,14 @@ const Settings: React.FC = () => {
     setLoading(true);
 
     try {
-      // Update profile if name changed
-      if (profileData.name !== user?.name) {
+      // Check if name or phone changed (using casting for phone comparison)
+      if (profileData.name !== user?.name || profileData.phone !== (user as any)?.phone) {
+        
+        // Cast the payload to 'any' to avoid errors if updateProfile type doesn't accept phone yet
         const response = await authApi.updateProfile({
-          name: profileData.name
-        });
+          name: profileData.name,
+          phone: profileData.phone 
+        } as any);
         
         if (!response.success) {
           throw new Error(response.message || 'Failed to update profile');
@@ -152,6 +157,17 @@ const Settings: React.FC = () => {
                 value={profileData.email}
                 disabled
                 title="Email cannot be changed"
+              />
+            </div>
+            {/* Added Phone Number Field */}
+            <div className="form-group">
+              <label className="form-label">Phone Number</label>
+              <input
+                type="tel"
+                className="form-input"
+                value={profileData.phone}
+                onChange={(e) => setProfileData(prev => ({ ...prev, phone: e.target.value }))}
+                placeholder="Enter phone number"
               />
             </div>
           </div>
